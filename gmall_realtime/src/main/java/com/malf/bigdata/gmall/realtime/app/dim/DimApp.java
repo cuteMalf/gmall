@@ -5,15 +5,23 @@ import com.alibaba.fastjson.JSONObject;
 import com.malf.bigdata.gmall.realtime.app.BaseAppV1;
 import com.malf.bigdata.gmall.realtime.bean.TableProcess;
 import com.malf.bigdata.gmall.realtime.common.GmallConstant;
+import com.malf.bigdata.gmall.realtime.util.JDBCUtil;
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.util.Collector;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 
 public class DimApp extends BaseAppV1{
     public static void main(String[] args) {
@@ -23,12 +31,58 @@ public class DimApp extends BaseAppV1{
 
     @Override
     protected void handleDataSteam(StreamExecutionEnvironment environment, DataStreamSource<String> dataStream) {
-        //1.对数据做清洗，filter
+        //1.ods_db读业务数据对数据做清洗，filter
         SingleOutputStreamOperator<JSONObject> JsonDataStream = filterDirtyData(dataStream);
         //2.flink cdc 读取配置表，并封装为java bean
         SingleOutputStreamOperator<TableProcess> tableProcessStream = readTableProcess(environment);
         //3.根据配置表，在phoenix，进行建表和删表
+        tableProcessStream
+                .filter((FilterFunction<TableProcess>) value -> "dim".equals(value.getSinkType()))
+                .process(new ProcessFunction<TableProcess, TableProcess>() {
 
+            private Connection phoenixConnection;
+
+            @Override
+            public void open(Configuration parameters) {
+                //open 每个并行度建立一个sql连接,防止频繁连接mysql,给MySQL造成过大的压力
+                //jdbc 连接六步
+                //1.建立连接
+                phoenixConnection = JDBCUtil.getPhoenixConnection();
+
+            }
+
+            @Override
+            public void processElement(TableProcess value, ProcessFunction<TableProcess, TableProcess>.Context ctx, Collector<TableProcess> out) throws SQLException {
+                //在这里处理 根据cdc 删表或者建表
+                StringBuilder createDDL = new StringBuilder();
+                //2.拼接SQL
+                createDDL
+                        .append("create table if not exists ")
+                        .append(value.getSinkTable())
+                        .append("(")
+                        .append(value.getSinkColumns().replaceAll("[^,]+","$0 varchar"))
+                        .append(",constraint pk primary key(")
+                        .append(value.getSinkPk()==null ? "id":value.getSinkPk())
+                        .append("))")
+                        .append(value.getSinkExtend() == null ? "" : value .getSinkExtend());
+                //3.获取预处理语句
+                PreparedStatement preparedStatement = phoenixConnection.prepareStatement(createDDL.toString());
+                //4.执行
+                preparedStatement.execute();
+                //5.关闭预处理
+                preparedStatement.close();
+
+            }
+
+            @Override
+            public void close() throws SQLException {
+                //6.关闭连接
+                JDBCUtil.close(phoenixConnection);
+
+
+            }
+
+        });
         //4.数据流和配置流的，进行connected
 
     }

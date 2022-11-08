@@ -119,12 +119,13 @@
             <scope>provided</scope>
         </dependency>
 
-        <dependency>
+        <dependency><!--flink cdc-->
             <groupId>com.ververica</groupId>
             <artifactId>flink-connector-mysql-cdc</artifactId>
             <version>2.2.1</version>
         </dependency>
 
+        <!--phoenix相关依赖-->
         <dependency>
             <groupId>org.apache.phoenix</groupId>
             <artifactId>phoenix-core</artifactId>
@@ -138,10 +139,17 @@
         </dependency>
 
         <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>30.1-jre</version>
+        </dependency>
+
+        <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java</artifactId>
-            <version>3.8.0</version>
+            <version>2.5.0</version>
         </dependency>
+
     </dependencies>
 
     <build>
