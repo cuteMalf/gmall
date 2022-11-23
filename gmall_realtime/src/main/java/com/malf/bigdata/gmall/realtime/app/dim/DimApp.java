@@ -4,7 +4,8 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.malf.bigdata.gmall.realtime.app.BaseAppV1;
 import com.malf.bigdata.gmall.realtime.bean.TableProcess;
-import com.malf.bigdata.gmall.realtime.common.GmallConstant;
+import com.malf.bigdata.gmall.realtime.common.GmallConfig;
+import com.malf.bigdata.gmall.realtime.util.FlinkSinkUtil;
 import com.malf.bigdata.gmall.realtime.util.JDBCUtil;
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
@@ -29,52 +30,48 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Arrays;
-import java.util.Iterator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 public class DimApp extends BaseAppV1{
     public static void main(String[] args) {
-        new DimApp().envInit(2001,2,"DimApp", GmallConstant.TOPIC_ODS_DB);
+        new DimApp().envInit(2001,2,"DimApp", GmallConfig.TOPIC_ODS_DB);
 
     }
 
     @Override
     protected void handleDataSteam(StreamExecutionEnvironment environment, DataStreamSource<String> dataStream) {
-        //1.ods_db读业务数据对数据做清洗，filter
+        //1.ods_db读业务数据对数据做etl，filter
         SingleOutputStreamOperator<JSONObject> odsDbDataStream = filterDirtyData(dataStream);
         //2.flink cdc 读取配置表，并封装为java bean
         SingleOutputStreamOperator<TableProcess> tableProcessStream = readTableProcess(environment);
         //3.根据配置表，在phoenix，进行建表和删表
         createOrDeleteDimTable(tableProcessStream);
         //4.数据流和配置流的，进行connected
+        //预加载配置信息
         SingleOutputStreamOperator<Tuple2<JSONObject, TableProcess>> connectedTwoDataStream = connectTwoStream(odsDbDataStream, tableProcessStream);
         //5.删除维度表中，不需要的字段
-        deleteUnwantedCloumns(connectedTwoDataStream);
+        //connectedTwoDataStream.print("没删之前");
+        SingleOutputStreamOperator<Tuple2<JSONObject, TableProcess>> resultStream = deleteUnwantedCloumns(connectedTwoDataStream);
+        //6.将维度数据写入到hbase
+        writeDimDataToHBase(resultStream);
 
     }
 
-    private void deleteUnwantedCloumns(SingleOutputStreamOperator<Tuple2<JSONObject, TableProcess>> connectedTwoDataStream) {
-        connectedTwoDataStream.map(new MapFunction<Tuple2<JSONObject, TableProcess>, Tuple2<JSONObject, TableProcess>>() {
+    private void writeDimDataToHBase(SingleOutputStreamOperator<Tuple2<JSONObject, TableProcess>> resultStream) {
+        resultStream.addSink(FlinkSinkUtil.getPhoenixSink());
+    }
+
+    private SingleOutputStreamOperator<Tuple2<JSONObject, TableProcess>> deleteUnwantedCloumns(SingleOutputStreamOperator<Tuple2<JSONObject, TableProcess>> connectedTwoDataStream) {
+        return connectedTwoDataStream.map(new MapFunction<Tuple2<JSONObject, TableProcess>, Tuple2<JSONObject, TableProcess>>() {
             @Override
             public Tuple2<JSONObject, TableProcess> map(Tuple2<JSONObject, TableProcess> value) {
                 JSONObject f0 = value.f0;
                 TableProcess f1 = value.f1;
-                //删除f0中，f1没有的元素
                 List<String> stringList = Arrays.asList(f1.getSinkColumns().split(","));
                 Set<String> keySet = f0.keySet();
-//                Iterator<String> iterator = keySet.iterator();
-//                while (!iterator.hasNext()){
-//                    String next = iterator.next();
-//                    if (!stringList.contains(next)){
-//                       iterator.remove();
-//                    }
-//                }
-                keySet.removeIf(key ->!stringList.contains(key)); //上方注释代码的优化
-
-
-
+                keySet.removeIf(key ->!stringList.contains(key) && !"opType".equals(key));
                 return Tuple2.of(f0,f1);
             }
         });
@@ -95,6 +92,21 @@ public class DimApp extends BaseAppV1{
         return odsDbDataStream
                 .connect(tableProcessBroadcastStream)
                 .process(new BroadcastProcessFunction<JSONObject, TableProcess, Tuple2<JSONObject,TableProcess>>() {
+                    private HashMap<String,TableProcess > hashMap;
+                    private Connection mysqlConnection;
+                    @Override
+                    public void open(Configuration parameters) {
+                        //先去预加载所有配置信息，存到一个map中
+                        //open方法中，可以获取状态，但是不能写入状态
+                        mysqlConnection = JDBCUtil.getMysqlConnection();
+                        String sql="select * from gmall_config.table_process";
+                        List<TableProcess> tableProcessList = JDBCUtil.queryList(mysqlConnection, sql, null, TableProcess.class,true);
+                        hashMap = new HashMap<>();
+                        for (TableProcess tableProcess : tableProcessList) {
+                            hashMap.put(tableProcess.getSourceTable()+":"+tableProcess.getSourceType(),tableProcess);
+                        }
+                    }
+
                     @Override
                     public void processElement(JSONObject value, ReadOnlyContext ctx, Collector<Tuple2<JSONObject, TableProcess>> out) throws Exception {
                         //4.处理数据流中的数据，根据配置信息，从广播状态中读取配置信息
@@ -104,9 +116,14 @@ public class DimApp extends BaseAppV1{
                         TableProcess tableProcess = tableProcessBroadcastState.get(key);
 
                         //tp 有可能为null,因为有可能是事实表和不需要的维度表
-                        if (tableProcess != null) {
-                            JSONObject data = value.getJSONObject("data");
-                            data.put("opType",value.getString("type"));
+                        //如果数据是业务的维度数据先来，配置流后来，则会出现tableProcess为空，这样就会导致数据丢失
+                        //先在map状态中获取，状态中是最新，如果取不到再去open方法中map中获取
+                        JSONObject data = value.getJSONObject("data");
+                        data.put("opType",value.getString("type"));
+
+                        if (tableProcess==null){
+                            out.collect(Tuple2.of(data,hashMap.get(key)));
+                        }else{
                             out.collect(Tuple2.of(data,tableProcess));
                         }
 
@@ -122,6 +139,11 @@ public class DimApp extends BaseAppV1{
                         String key= value.getSourceTable()+":"+value.getSourceType();
                         tableProcessBroadcastState.put(key,value);
 
+                    }
+
+                    @Override
+                    public void close() throws Exception {
+                        JDBCUtil.close(mysqlConnection);
                     }
                 });
     }

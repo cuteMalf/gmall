@@ -2,9 +2,11 @@ package com.malf.bigdata.gmall.realtime.bean;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
 @AllArgsConstructor
+@NoArgsConstructor
 public class TableProcess {
     // 来源表
     private String sourceTable;
