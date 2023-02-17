@@ -38,7 +38,7 @@ public class Dwd_01_BaseLogApp extends BaseAppV1 {
     }
 
     @Override
-    protected void handleDataSteam(StreamExecutionEnvironment environment, DataStreamSource<String> dataStream) {
+    protected void handleDataStream(StreamExecutionEnvironment environment, DataStreamSource<String> dataStream) {
         //1.etl
         SingleOutputStreamOperator<JSONObject> etledStream = etl(dataStream);
         //2. 纠正新老客户

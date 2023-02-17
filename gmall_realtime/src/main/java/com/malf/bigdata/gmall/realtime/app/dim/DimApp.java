@@ -41,7 +41,7 @@ public class DimApp extends BaseAppV1{
     }
 
     @Override
-    protected void handleDataSteam(StreamExecutionEnvironment environment, DataStreamSource<String> dataStream) {
+    protected void handleDataStream(StreamExecutionEnvironment environment, DataStreamSource<String> dataStream) {
         //1.ods_db读业务数据对数据做etl，filter
         SingleOutputStreamOperator<JSONObject> odsDbDataStream = filterDirtyData(dataStream);
         //2.flink cdc 读取配置表，并封装为java bean
@@ -50,6 +50,7 @@ public class DimApp extends BaseAppV1{
         createOrDeleteDimTable(tableProcessStream);
         //4.数据流和配置流的，进行connected
         //预加载配置信息
+        //通过广播流，过滤数据，动态分流
         SingleOutputStreamOperator<Tuple2<JSONObject, TableProcess>> connectedTwoDataStream = connectTwoStream(odsDbDataStream, tableProcessStream);
         //5.删除维度表中，不需要的字段
         //connectedTwoDataStream.print("没删之前");
@@ -79,6 +80,7 @@ public class DimApp extends BaseAppV1{
 
     /**
      * 连接odsDb 和 Mysql中配置流
+     * 将ods_db 中数据插入到hbase中，通过mysql配置流剥离出来
      * @param odsDbDataStream ods_db 数据流
      * @param tableProcessStream mysql 配置流
      * @return connectTwoStream
