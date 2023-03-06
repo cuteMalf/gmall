@@ -27,7 +27,7 @@ public abstract class BaseSQLApp {
         environment.setParallelism(parallelism);
         environment.setRuntimeMode(RuntimeExecutionMode.AUTOMATIC);
         //开启checkpoint,在企业中一般是分钟级别的1，3，5，10
-        environment.enableCheckpointing(3000L);
+        environment.enableCheckpointing(3000L); //注释掉这条语句，就会关闭checkpoint
         //设置状态后端：1.memory 2.fs 3.rocksdb
         //1.13之前，本地和checkpoint 都是由状态后端管理 memory （本地：taskManager内存 checkpoint：在jobManager的内存）,hdfs(本地：taskManager的内存 checkpoint：hdfs),rocksDb(本地：rocksdb checkpoint：在hdf上)
         //1.13之后，本地和checkpoint 分开，状态后端只负责本地的存贮，checkpoint有专门的负责。只有memory 和rocksdb。memory-> taskManger中使用HashMapStateEnd存贮.2.rocksdb

@@ -20,6 +20,11 @@ public class JDBCUtil {
         return getJDBCConnection(GmallConfig.MYSQL_DRIVER, GmallConfig.MYSQL_URL,"root","aaaaaa");
     }
 
+    public static Connection getClickHouseConnection(){
+        return getJDBCConnection(GmallConfig.CLICKHOUSE_DRIVER,GmallConfig.CLICKHOUSE_URL,"ck","123456");
+
+    }
+
     private static Connection getJDBCConnection(String driver, String url, String user, String password) {
 
         try {

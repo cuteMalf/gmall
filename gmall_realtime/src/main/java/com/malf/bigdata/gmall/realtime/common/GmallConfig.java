@@ -28,7 +28,7 @@ public class GmallConfig {
     public static final String TOPIC_DWD_TRADE_REFUND_PAY_SUC = "dwd_trade_refund_pay_suc";
 
     public static final String CLICKHOUSE_DRIVER = "com.clickhouse.jdbc.ClickHouseDriver";
-    public static final String CLICKHOUSE_URL = "jdbc:clickhouse://hadoop162:8123/gmall2022";
+    public static final String CLICKHOUSE_URL = "jdbc:clickhouse://192.168.2.158:8123/system";
     public static final String REDIS_HOST = "hadoop162";
     public static final int REDIS_PORT = 6379;
 

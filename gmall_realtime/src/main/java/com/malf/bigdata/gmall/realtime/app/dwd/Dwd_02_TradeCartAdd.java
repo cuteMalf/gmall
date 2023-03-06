@@ -7,6 +7,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
+import java.time.Duration;
+
 public class Dwd_02_TradeCartAdd extends BaseSQLApp {
     public static void main(String[] args) {
         new Dwd_02_TradeCartAdd().envInit(2003, 2, "Dwd_02_TradeCartAdd");
@@ -15,6 +17,15 @@ public class Dwd_02_TradeCartAdd extends BaseSQLApp {
 
     @Override
     protected void handleDataTable(StreamExecutionEnvironment environment, StreamTableEnvironment tableEnvironment) {
+        /**
+         *设置空闲状态的ttl，防止状态的永久保存，吃满内存
+         * tableEnvironment.getConfig().setIdleStateRetention(Duration.ofSeconds(10L));
+         * tableEnvironment.getConfig().getConfiguration().setString("table.exe.state.ttl","10 s");
+         * 但是内连接和左连接却有不同，内连接会在join时数据就会没了，左连接会在左值空闲10s后消失
+         */
+
+
+
         //1.消费ods_db
         readOdsDb(tableEnvironment, "Dwd_02_TradeCartAdd");
         //2.从topic ods_db中过滤出加购数据
